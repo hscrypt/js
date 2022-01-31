@@ -1,6 +1,7 @@
 import { randomBytes, pbkdf2Sync } from "crypto"
+import fetch, { Response } from "node-fetch-commonjs"
 
-import ChaCha20 from "ts-chacha20";
+import { Chacha20 } from "ts-chacha20";
 
 function checkStatus(response: Response) {
     if (!response.ok) {
@@ -45,7 +46,7 @@ export function encrypt({ source, pswd, iterations, }: {
     const secret = pbkdf2Sync(pswd, salt, iterations || DEFAULT_ITERATIONS, SECRET_KEY_LENGTH, DIGEST)
     const nonce = randomBytes(NONCE_LENGTH)
 
-    const encoder = new ChaCha20(secret, nonce)
+    const encoder = new Chacha20(secret, nonce)
 
     const input = new TextEncoder().encode(source)
     const ciphertext = encoder.encrypt(input)
@@ -68,7 +69,7 @@ export function decrypt({ encrypted, pswd, iterations, }: {
     const ciphertext = encrypted.slice(SALT_LENGTH + NONCE_LENGTH)
     const secret = pbkdf2Sync(pswd, salt, iterations || DEFAULT_ITERATIONS, SECRET_KEY_LENGTH, DIGEST)
 
-    const decoder = new ChaCha20(secret, nonce)
+    const decoder = new Chacha20(secret, nonce)
     const source = new TextDecoder().decode(decoder.decrypt(ciphertext))
 
     return source
