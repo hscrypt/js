@@ -38,7 +38,7 @@ const SALT_LENGTH = 32
 const NONCE_LENGTH = 12
 
 export function encrypt({ source, pswd, iterations, }: {
-    source: string,
+    source: string | Buffer,
     pswd: string,
     iterations?: number
 }): Uint8Array {
@@ -48,7 +48,7 @@ export function encrypt({ source, pswd, iterations, }: {
 
     const encoder = new Chacha20(secret, nonce)
 
-    const input = new TextEncoder().encode(source)
+    const input = (typeof source === 'string') ? new TextEncoder().encode(source) : source
     const ciphertext = encoder.encrypt(input)
 
     const encrypted = new Uint8Array(salt.length + nonce.length + ciphertext.length)
