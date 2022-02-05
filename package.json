@@ -1,6 +1,6 @@
 {
   "name": "hscrypt",
-  "version": "0.0.1",
+  "version": "0.0.2-rc.0",
   "main": "./dist/src/hscrypt.js",
   "types": "./dist/src/hscrypt.d.ts",
   "exports": {
