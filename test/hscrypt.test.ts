@@ -8,8 +8,9 @@ function abcdef() {
 }`
 
     const pswd = 'my-password'
-    const encrypted = encrypt({ source, pswd })
-    const decrypted = decrypt({ encrypted, pswd })
+    const iterations = 1000
+    const encrypted = encrypt({ source, pswd, iterations, })
+    const decrypted = decrypt({ encrypted, pswd, iterations, })
 
     expect(decrypted).toBe(source);
 });

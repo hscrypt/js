@@ -5,25 +5,30 @@
   "types": "build/src/hscrypt.d.ts",
   "dependencies": {
     "crypto": "^1.0.1",
+    "crypto-js": "^4.1.1",
     "node-fetch-commonjs": "^3.1.1",
     "ts-chacha20": "file:../../js-chacha20/ts-chacha20-1.2.0.tgz"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.16.11",
+    "@types/crypto-js": "^4.1.0",
     "@types/jest": "^27.4.0",
     "@types/tape": "^4.13.2",
     "babel-jest": "^27.4.6",
     "babel-register": "^6.26.0",
+    "crypto-browserify": "^3.12.0",
     "jest": "^27.4.7",
     "tap-spec": "^5.0.0",
     "tape": "^5.5.0",
     "ts-jest": "^27.1.3",
     "ts-loader": "^9.2.6",
-    "typescript": "^4.5.5"
+    "typescript": "^4.5.5",
+    "webpack-cli": "^4.9.2"
   },
   "scripts": {
     "build": "node_modules/.bin/tsc",
-    "pack": "npm run build && npm pack",
-    "test": "jest"
+    "pack": "npm run build && npm pack && npm run webpack",
+    "test": "jest",
+    "webpack": "node_modules/.bin/webpack"
   }
 }
