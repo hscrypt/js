@@ -18,8 +18,8 @@ module.exports = {
         },
     },
     output: {
-        path: path.resolve(__dirname, 'dist'),
-        filename: 'hscrypt.js',
+        path: path.resolve(__dirname, 'dist', 'src'),
+        filename: 'hscrypt.mjs',
         library: 'hscrypt'
     },
 };
