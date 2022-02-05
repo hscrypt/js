@@ -1,16 +1,7 @@
 var path = require('path');
 
-// const ENV = process.env['NODE_ENV']
-// const production = ENV === 'production'
-
 module.exports = {
-    // mode: 'production',
     entry: './src/hscrypt.ts',
-    output: {
-        path: path.resolve(__dirname, 'dist'),
-        filename: 'hscrypt.js',
-        library: 'hscrypt'
-    },
     module: {
         rules: [
             {
@@ -20,20 +11,15 @@ module.exports = {
             },
         ],
     },
-    "resolve": {
-        "fallback": {
-            "crypto": require.resolve("crypto-browserify"),
-        },
-    },
     resolve: {
         extensions: [ '.ts', '.js', ],
+        fallback: {
+            crypto: require.resolve("crypto-browserify"),
+        },
     },
-    // externals: {
-    //     lodash: {
-    //         commonjs: 'lodash',
-    //         commonjs2: 'lodash',
-    //         amd: 'lodash',
-    //         root: '_'
-    //     }
-    // }
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        filename: 'hscrypt.js',
+        library: 'hscrypt'
+    },
 };
