@@ -1,4 +1,5 @@
-import { encrypt, decrypt } from '../src/hscrypt'
+import { encrypt } from '../src/encrypt'
+import { decrypt } from '../src/hscrypt'
 
 test('encryption/decryption round-trip', () => {
     const source = `var abc = 123;
@@ -12,5 +13,5 @@ function abcdef() {
     const encrypted = encrypt({ source, pswd, iterations, })
     const decrypted = decrypt({ encrypted, pswd, iterations, })
 
-    expect(decrypted).toBe(source);
+    expect(decrypted.source).toBe(source);
 });

@@ -1,7 +1,7 @@
 var path = require('path');
 
 module.exports = {
-    entry: './src/hscrypt.ts',
+    entry: './src/encrypt.ts',
     module: {
         rules: [
             {
