@@ -24,30 +24,32 @@ export class DecryptionError extends Error {
     }
 }
 
-export type MsgCb<T> = (args: T) => void
-export type MissingKeyCb = MsgCb<{ msg: string }>
-export type DecryptionErrorCb = MsgCb<{ err: DecryptionError, cacheHit: boolean }>
+export type Cb<T> = (args: T) => void
+export type CbRef<T> = Cb<T> | string
+export type MissingKeyCbArgs = { msg: string }
+export type DecryptionErrorCbArgs = { err: DecryptionError, cacheHit: boolean }
 
 export type InjectConfig = {
     src: string
     pswd: string
     iterations: number
     cache: boolean
-    missingKeyCb?: MissingKeyCb | string
-    decryptionErrorCb?: DecryptionErrorCb | string
+    missingKeyCb?: CbRef<MissingKeyCbArgs>
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
     scrubHash?: boolean
     watchHash?: boolean
 }
 
-function getCb<T>(cb: MsgCb<T> | string): MsgCb<T> {
+// Coerce a "callback ref" (which may be a callback function or a "."-delimited string name of a global function, e.g.
+// "MyApp.myCb") to a callback
+function getCb<T>(cb: CbRef<T>): Cb<T> {
     if (typeof cb === 'string') {
         const pieces = cb.split('.')
-        const fn: MsgCb<T> = pieces.reduce<{ [k: string]: any }>((obj, k) => obj && obj[k], window) as any
+        const fn: Cb<T> = pieces.reduce<{ [k: string]: any }>((obj, k) => obj && obj[k], window) as any
         return fn
     } else {
         return cb
     }
-
 }
 
 export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionErrorCb, scrubHash, watchHash, }: InjectConfig) {
@@ -71,7 +73,7 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     if (watchHash || watchHash === undefined) {
         hashListener = () => {
             console.log("Detected hash change, re-injecting")
-            inject({ src, pswd: null, iterations, cache, missingKeyCb, decryptionErrorCb, scrubHash, watchHash: false, })
+            inject({src, pswd: null, iterations, cache, missingKeyCb, decryptionErrorCb, scrubHash, watchHash: false,})
         }
         window.addEventListener("hashchange", hashListener, false);
         console.log(`Added hashListener: ${hashListener}`)
@@ -80,7 +82,7 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     // If `cache` is true, the `secretHex` (post-PBKDF2) is cached in localStorage under a key that is unique to the
     // current URL "pathname" component (all of `localStorage` is assumed to be specific to the current "hostname").
     // Caching post-PBKDF2 secret material allows for faster reloads of previously decrypted pages.
-    const localStorageKey = getLocalStorageKey()
+    const localStorageKey = cache ? getLocalStorageKey() : undefined
 
     let cacheHit = false
     if (!pswd && cache) {
@@ -99,13 +101,26 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     if (!pswd && !secretHex) {
         const msg = "Please provide a password / decryption key as a URL hash"
         if (!missingKeyCb) {
-            missingKeyCb = ({ msg: string }) => console.log(msg)
+            missingKeyCb = ({ msg }: MissingKeyCbArgs) => console.log(msg)
         }
         const cb = getCb(missingKeyCb)
-        cb({ msg })
+        cb({msg})
         return
     }
 
+    return fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, })
+}
+
+export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: {
+    src: string
+    pswd: string
+    iterations: number
+    secretHex: string
+    localStorageKey?: string
+    cacheHit?: boolean
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
+    hashListener?: () => void
+}) {
     // Fetch + Decrypt the remote+encrypted source bundle
     return fetch(src)
         .then(response => {
@@ -113,62 +128,75 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
             return response.arrayBuffer().then(buf => new Uint8Array(buf))
         })
         .then(encrypted => {
-            try {
-                const { source, secret } = decrypt({encrypted, pswd, iterations, secretHex,})
-                if (cache && !secretHex) {
-                    // Cache the post-PBKDF2 secret material for faster subsequent reloads
-                    secretHex = toHexString(secret)
-                    localStorage.setItem(localStorageKey, secretHex)
-                    console.log(`Saved secretHex, ${localStorageKey}: ${secretHex}`)
-                }
+            decryptAndCache({ encrypted, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, })
+        })
+}
 
-                // Inject the decrypted source by appending to document.body. TODO: make this configurable?
-                console.log(`hscrypt: injecting source from ${src}`)
-                const script = document.createElement('script')
-                script.setAttribute("type", "text/javascript")
-                script.innerHTML = source
-                document.body.appendChild(script)
+export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: {
+    encrypted: Uint8Array
+    pswd: string
+    iterations: number
+    secretHex: string
+    localStorageKey?: string
+    cacheHit?: boolean
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
+    hashListener?: () => void
+}) {
+    try {
+        const { source, secret } = decrypt({ encrypted, pswd, iterations, secretHex, })
+        if (localStorageKey && !secretHex) {
+            // Cache the post-PBKDF2 secret material for faster subsequent reloads
+            secretHex = toHexString(secret)
+            localStorage.setItem(localStorageKey, secretHex)
+            console.log(`Saved secretHex, ${localStorageKey}: ${secretHex}`)
+        }
 
-                // Remove any `hashListener`, if one was added
-                if (hashListener) {
-                    console.log("Removing hashListener")
-                    window.removeEventListener("hashchange", hashListener, false)
-                }
-            } catch (err) {
-                console.log(`Caught: ${err} (${err instanceof DecryptionError}), ${err.name}`)
-                if (err instanceof DecryptionError) {
-                    // DecryptionError can result from:
-                    // 1. secret material was cached in `localStorage` for a previous version of this URL, and is now
-                    //    out of date (secret was read from cache, where it would only have been stored after a previous
-                    //    successful decryption, but now decryption has failed), or
-                    // 2. password provided in this decryption invocation failed to decrypt the ciphertext (password is
-                    //    incorrect, presumably)
-                    //
-                    // In the first case, we clear the cache entry, and in either case we invoke the `decryptionErrorCb`
-                    // (defaults to `alert` + `throw`, but can be passed a string like "MyApp.myDecryptionErrorCb").
-                    console.log(`Caught DecryptionError: ${err}`)
-                    if (cacheHit) {
-                        console.log(`Clearing cache key ${localStorageKey} after unsuccessful decryption of cached secretHex`)
-                        localStorage.removeItem(localStorageKey)
-                    }
-                    const msg =
-                        cacheHit
-                            ? `Decryption failed: ${err.message} (bad / out of date cache; clearing)`
-                            : `Decryption failed: ${err.message} (wrong password?)`
-                    if (!decryptionErrorCb) {
-                        decryptionErrorCb = ({ err: DecryptionError, cacheHit: boolean }) => {
-                            alert(msg)
-                            throw err
-                        }
-                    }
-                    const cb = getCb(decryptionErrorCb)
-                    cb({ err, cacheHit })
-                    return
-                } else {
+        // Inject the decrypted source by appending to document.body. TODO: make this configurable?
+        console.log(`hscrypt: injecting source`)
+        const script = document.createElement('script')
+        script.setAttribute("type", "text/javascript")
+        script.innerHTML = source
+        document.body.appendChild(script)
+
+        // Remove any `hashListener`, if one was added
+        if (hashListener) {
+            console.log("Removing hashListener")
+            window.removeEventListener("hashchange", hashListener, false)
+        }
+    } catch (err) {
+        console.log(`Caught: ${err} (${err instanceof DecryptionError}), ${err.name}`)
+        if (err instanceof DecryptionError) {
+            // DecryptionError can result from:
+            // 1. secret material was cached in `localStorage` for a previous version of this URL, and is now
+            //    out of date (secret was read from cache, where it would only have been stored after a previous
+            //    successful decryption, but now decryption has failed), or
+            // 2. password provided in this decryption invocation failed to decrypt the ciphertext (password is
+            //    incorrect, presumably)
+            //
+            // In the first case, we clear the cache entry, and in either case we invoke the `decryptionErrorCb`
+            // (defaults to `alert` + `throw`, but can be passed a string like "MyApp.myDecryptionErrorCb").
+            console.log(`Caught DecryptionError: ${err}`)
+            if (cacheHit) {
+                console.log(`Clearing cache key ${localStorageKey} after unsuccessful decryption of cached secretHex`)
+                localStorage.removeItem(localStorageKey)
+            }
+            const msg =
+                cacheHit
+                    ? `Decryption failed: ${err.message} (bad / out of date cache; clearing)`
+                    : `Decryption failed: ${err.message} (wrong password?)`
+            if (!decryptionErrorCb) {
+                decryptionErrorCb = ({ err, cacheHit, } : DecryptionErrorCbArgs) => {
+                    alert(msg)
                     throw err
                 }
             }
-        })
+            const cb = getCb(decryptionErrorCb)
+            cb({ err, cacheHit })
+            return
+        } else {
+            throw err
+        }
+    }
 }
 
 export function decrypt({ encrypted, pswd, iterations, secretHex, }: {
