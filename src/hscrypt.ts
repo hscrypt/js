@@ -111,7 +111,28 @@ export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb
             // By default, "scrub" (remove) the password from the URL hash (after reading+storing it)
             if (scrubHash || scrubHash === undefined) {
                 console.log("Scrubbing password from URL fragment")
-                document.location.hash = ''
+                const location = window.location
+                const title = 'Decrypted page'
+                if (!document.title) {
+                    // Hscrypt makes a best effort to not store the password anywhere, but browsers seem to record it
+                    // (as part of the URL hash) in their history in a way I haven't found a workaround for.
+                    //
+                    // Chrome and Firefox (but no Safari, afaict; other browsers as yet untested), in the absence of a
+                    // page title, display the full URL (including the hash) as the tab title, somewhat prominently.
+                    // Here we set a placeholder page title to avoid this, but the recommended practice is to set a
+                    // <title> on hscrypt encrypted landing pages.
+                    //
+                    // More discussion: https://stackoverflow.com/a/41073373/544236
+                    console.warn(
+                        "No `document.title` set on page receiving password via URL hash; some browsers (Chrome " +
+                        "and Firefox, at least) display the full URL (including hash) as the title, which creates a " +
+                        "risk of \"shoulder-surfing.\" Overriding the title now, but in general it's recommended to " +
+                        "set a <title> on hscrypt encrypted landing pages. Also note that the password is likely " +
+                        "persisted in this browser's history as part of the page's location."
+                    )
+                    document.title = title
+                }
+                history.replaceState(null, title, location.pathname + location.search)
             }
         }
     }
