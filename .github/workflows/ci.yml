@@ -13,6 +13,7 @@ jobs:
       with:
         node-version: '17'
         cache: 'npm'
+        registry-url: 'https://registry.npmjs.org'
     - run: npm install
     - run: npm pack
     - run: npm test
