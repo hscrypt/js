@@ -12,7 +12,10 @@ import {
     SOURCE_PREFIX,
     HSCRYPT_CONFIG_VAR
 } from "./utils"
+import { getLocalStorageKey } from "./cache"
+
 export { DEFAULT_ITERATIONS, HSCRYPT_CONFIG_VAR, SOURCE_PREFIX } from "./utils"
+export { LOCALSTORAGE_PREFIX, getLocalStorageKey, getCachedDecryptionKey, clearCachedDecryptionKey, } from "./cache"
 export { encrypt } from "./encrypt"
 
 function checkStatus(response: Response) {
@@ -20,11 +23,6 @@ function checkStatus(response: Response) {
         throw new Error(`HTTP ${response.status} - ${response.statusText}`);
     }
     return response;
-}
-
-export function getLocalStorageKey() {
-    const path = window.location.pathname
-    return `hscrypt.secret:${path}`
 }
 
 export class DecryptionError extends Error {
@@ -137,6 +135,7 @@ export type FetchAndDecrypt = {
 export function decrypt(pswd: string, config?: FetchAndDecrypt) {
     const HSCRYPT_CONFIG = (window as any)[HSCRYPT_CONFIG_VAR] as any
     config = Object.assign({}, HSCRYPT_CONFIG, config)
+    console.log("Full decryption object:", config)
     return fetchAndDecrypt(config)
 }
 
