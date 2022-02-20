@@ -1,6 +1,6 @@
 {
   "name": "hscrypt",
-  "version": "0.0.3-rc.1",
+  "version": "0.0.3-rc.2",
   "description": "Encrypt Javascript bundles (at build time), inject+decrypt them into pages later (in the browser)",
   "homepage": "https://github.com/hscrypt/js",
   "keywords": [
@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "crypto-js": "^4.1.1",
-    "ts-chacha20": "^1.2.0-rc.0"
+    "ts-chacha20": "^1.2.0-rc.1"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.1.0",
