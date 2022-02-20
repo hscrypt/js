@@ -1,6 +1,6 @@
 {
   "name": "hscrypt",
-  "version": "0.0.3-rc.2",
+  "version": "0.0.3-rc.3",
   "description": "Encrypt Javascript bundles (at build time), inject+decrypt them into pages later (in the browser)",
   "homepage": "https://github.com/hscrypt/js",
   "keywords": [
