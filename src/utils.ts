@@ -1,3 +1,6 @@
+// Name of a global config object stored on `window`
+export const HSCRYPT_CONFIG_VAR = 'HSCRYPT_CONFIG'
+
 // Cipher params
 export const SECRET_KEY_LENGTH = 32
 export const DEFAULT_ITERATIONS = 10_000

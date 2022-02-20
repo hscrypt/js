@@ -2,7 +2,17 @@ import CryptoJS from "crypto-js";
 import { Chacha20 } from "ts-chacha20";
 
 import { toUint8Array, convertUint8ArrayToWordArray } from "./crypto"
-import { fromHexString, toHexString, SALT_LENGTH, NONCE_LENGTH, DEFAULT_ITERATIONS, SECRET_KEY_LENGTH, SOURCE_PREFIX } from "./utils"
+import {
+    fromHexString,
+    toHexString,
+    SALT_LENGTH,
+    NONCE_LENGTH,
+    DEFAULT_ITERATIONS,
+    SECRET_KEY_LENGTH,
+    SOURCE_PREFIX,
+    HSCRYPT_CONFIG_VAR
+} from "./utils"
+export { DEFAULT_ITERATIONS, HSCRYPT_CONFIG_VAR, SOURCE_PREFIX } from "./utils"
 export { encrypt } from "./encrypt"
 
 function checkStatus(response: Response) {
@@ -111,7 +121,7 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     return fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, })
 }
 
-export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: {
+export type FetchAndDecrypt = {
     src: string
     pswd: string
     iterations: number
@@ -120,7 +130,18 @@ export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorage
     cacheHit?: boolean
     decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
     hashListener?: () => void
-}) {
+}
+
+// Simplest entrypoint to decryption+injection from client: call with password, all other configs pulled from global
+// HSCRYPT_CONFIG
+export function decrypt(pswd: string, config?: FetchAndDecrypt) {
+    const HSCRYPT_CONFIG = (window as any)[HSCRYPT_CONFIG_VAR] as any
+    config = Object.assign({}, HSCRYPT_CONFIG, config)
+    return fetchAndDecrypt(config)
+}
+
+// Fetch+decrypt encrypted source bundle (and optionally cache, if `localStorageKey` is provided)
+export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: FetchAndDecrypt) {
     // Fetch + Decrypt the remote+encrypted source bundle
     return fetch(src)
         .then(response => {
@@ -132,6 +153,7 @@ export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorage
         })
 }
 
+// Decrypt ciphertext, optionally cache decryption key in `localStorage`
 export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: {
     encrypted: Uint8Array
     pswd: string
@@ -143,7 +165,7 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localS
     hashListener?: () => void
 }) {
     try {
-        const { source, secret } = decrypt({ encrypted, pswd, iterations, secretHex, })
+        const { source, secret } = _decrypt({ encrypted, pswd, iterations, secretHex, })
         if (localStorageKey && !secretHex) {
             // Cache the post-PBKDF2 secret material for faster subsequent reloads
             secretHex = toHexString(secret)
@@ -199,7 +221,8 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localS
     }
 }
 
-export function decrypt({ encrypted, pswd, iterations, secretHex, }: {
+// Perform+verify decryption, return decrypted source + post-PBKDF2 secret (for possible caching)
+export function _decrypt({ encrypted, pswd, iterations, secretHex, }: {
     encrypted: Uint8Array,
     pswd: string,
     iterations?: number,
