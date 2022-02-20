@@ -37,15 +37,56 @@ export type CbRef<T> = Cb<T> | string
 export type MissingKeyCbArgs = { msg: string }
 export type DecryptionErrorCbArgs = { err: DecryptionError, cacheHit: boolean }
 
+export type Decrypt = {
+    src?: string
+    iterations?: number
+    secretHex?: string
+    cacheDecryptionKey?: boolean
+    cacheHit?: boolean
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
+    hashListener?: () => void
+}
+export type FetchAndDecrypt = {
+    src: string
+    pswd: string
+
+    iterations?: number
+    secretHex?: string
+    cacheDecryptionKey?: boolean
+    cacheHit?: boolean
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
+    hashListener?: () => void
+}
+export type DecryptAndCache = {
+    encrypted: Uint8Array
+    pswd: string
+
+    iterations?: number
+    secretHex?: string
+    cacheDecryptionKey?: boolean
+    cacheHit?: boolean
+    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
+    hashListener?: () => void
+}
+
 export type InjectConfig = {
     src: string
     pswd: string
-    iterations: number
-    cache: boolean
+
+    iterations?: number
+    cacheDecryptionKey?: boolean
     missingKeyCb?: CbRef<MissingKeyCbArgs>
     decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
     scrubHash?: boolean
     watchHash?: boolean
+}
+
+export type _Decrypt = {
+    encrypted: Uint8Array,
+    pswd: string,
+
+    iterations?: number,
+    secretHex?: string,
 }
 
 // Coerce a "callback ref" (which may be a callback function or a "."-delimited string name of a global function, e.g.
@@ -60,7 +101,7 @@ function getCb<T>(cb: CbRef<T>): Cb<T> {
     }
 }
 
-export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionErrorCb, scrubHash, watchHash, }: InjectConfig) {
+export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb, decryptionErrorCb, scrubHash, watchHash, }: InjectConfig) {
     // In the common case, the `pswd` argument is empty, and we look for it in the URL "hash"
     let secretHex: string
     if (!pswd) {
@@ -81,7 +122,7 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     if (watchHash || watchHash === undefined) {
         hashListener = () => {
             console.log("Detected hash change, re-injecting")
-            inject({src, pswd: null, iterations, cache, missingKeyCb, decryptionErrorCb, scrubHash, watchHash: false,})
+            inject({src, pswd: null, iterations, cacheDecryptionKey, missingKeyCb, decryptionErrorCb, scrubHash, watchHash: false,})
         }
         window.addEventListener("hashchange", hashListener, false);
         console.log(`Added hashListener: ${hashListener}`)
@@ -90,10 +131,10 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
     // If `cache` is true, the `secretHex` (post-PBKDF2) is cached in localStorage under a key that is unique to the
     // current URL "pathname" component (all of `localStorage` is assumed to be specific to the current "hostname").
     // Caching post-PBKDF2 secret material allows for faster reloads of previously decrypted pages.
-    const localStorageKey = cache ? getLocalStorageKey() : undefined
+    const localStorageKey = cacheDecryptionKey ? getLocalStorageKey() : undefined
 
     let cacheHit = false
-    if (!pswd && cache) {
+    if (!pswd && cacheDecryptionKey) {
         secretHex = localStorage.getItem(localStorageKey)
         if (secretHex) {
             console.log("Read secretHex from cache:", secretHex)
@@ -116,31 +157,23 @@ export function inject({ src, pswd, iterations, cache, missingKeyCb, decryptionE
         return
     }
 
-    return fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, })
-}
-
-export type FetchAndDecrypt = {
-    src: string
-    pswd: string
-    iterations: number
-    secretHex: string
-    localStorageKey?: string
-    cacheHit?: boolean
-    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
-    hashListener?: () => void
+    return fetchAndDecrypt({ src, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
 }
 
 // Simplest entrypoint to decryption+injection from client: call with password, all other configs pulled from global
 // HSCRYPT_CONFIG
-export function decrypt(pswd: string, config?: FetchAndDecrypt) {
+export function decrypt(pswd: string, config?: Decrypt) {
+    if (!pswd) {
+        throw new Error("hscrypt.decrypt: password required")
+    }
     const HSCRYPT_CONFIG = (window as any)[HSCRYPT_CONFIG_VAR] as any
-    config = Object.assign({}, HSCRYPT_CONFIG, config)
+    const c: FetchAndDecrypt = Object.assign({}, HSCRYPT_CONFIG, config, { pswd })
     console.log("Full decryption object:", config)
-    return fetchAndDecrypt(config)
+    return fetchAndDecrypt(c)
 }
 
 // Fetch+decrypt encrypted source bundle (and optionally cache, if `localStorageKey` is provided)
-export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: FetchAndDecrypt) {
+export function fetchAndDecrypt({ src, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: FetchAndDecrypt) {
     // Fetch + Decrypt the remote+encrypted source bundle
     return fetch(src)
         .then(response => {
@@ -148,24 +181,16 @@ export function fetchAndDecrypt({ src, pswd, iterations, secretHex, localStorage
             return response.arrayBuffer().then(buf => new Uint8Array(buf))
         })
         .then(encrypted => {
-            decryptAndCache({ encrypted, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, })
+            decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
         })
 }
 
 // Decrypt ciphertext, optionally cache decryption key in `localStorage`
-export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localStorageKey, cacheHit, decryptionErrorCb, hashListener, }: {
-    encrypted: Uint8Array
-    pswd: string
-    iterations: number
-    secretHex: string
-    localStorageKey?: string
-    cacheHit?: boolean
-    decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
-    hashListener?: () => void
-}) {
+export function decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: DecryptAndCache ) {
+    const localStorageKey = getLocalStorageKey()
     try {
         const { source, secret } = _decrypt({ encrypted, pswd, iterations, secretHex, })
-        if (localStorageKey && !secretHex) {
+        if (cacheDecryptionKey && !secretHex) {
             // Cache the post-PBKDF2 secret material for faster subsequent reloads
             secretHex = toHexString(secret)
             localStorage.setItem(localStorageKey, secretHex)
@@ -221,12 +246,12 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, localS
 }
 
 // Perform+verify decryption, return decrypted source + post-PBKDF2 secret (for possible caching)
-export function _decrypt({ encrypted, pswd, iterations, secretHex, }: {
-    encrypted: Uint8Array,
-    pswd: string,
-    iterations?: number,
-    secretHex?: string,
-}): { source: string, secret: Uint8Array } {
+export function _decrypt(
+    { encrypted, pswd, iterations, secretHex, }: _Decrypt
+): {
+    source: string,
+    secret: Uint8Array
+} {
     let secret: Uint8Array
     const nonce = encrypted.slice(SALT_LENGTH, SALT_LENGTH + NONCE_LENGTH)
     const ciphertext = encrypted.slice(SALT_LENGTH + NONCE_LENGTH)
