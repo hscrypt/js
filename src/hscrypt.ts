@@ -5,16 +5,17 @@ import { toUint8Array, convertUint8ArrayToWordArray } from "./crypto"
 import {
     fromHexString,
     toHexString,
+    Source,
     SALT_LENGTH,
     NONCE_LENGTH,
     DEFAULT_ITERATIONS,
-    SECRET_KEY_LENGTH,
+    DECRYPTION_KEY_LENGTH,
     SOURCE_PREFIX,
     HSCRYPT_CONFIG_VAR
 } from "./utils"
 import { getLocalStorageKey } from "./cache"
 
-export { DEFAULT_ITERATIONS, HSCRYPT_CONFIG_VAR, SOURCE_PREFIX } from "./utils"
+export { DEFAULT_ITERATIONS, HSCRYPT_CONFIG_VAR, SOURCE_PREFIX, SOURCE_PREFIX_ARRAY, Source } from "./utils"
 export { LOCALSTORAGE_PREFIX, getLocalStorageKey, getCachedDecryptionKey, clearCachedDecryptionKey, } from "./cache"
 export { encrypt } from "./encrypt"
 
@@ -40,7 +41,7 @@ export type DecryptionErrorCbArgs = { err: DecryptionError, cacheHit: boolean }
 export type Decrypt = {
     src?: string
     iterations?: number
-    secretHex?: string
+    decryptionKeyHex?: string
     cacheDecryptionKey?: boolean
     cacheHit?: boolean
     decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
@@ -51,7 +52,7 @@ export type FetchAndDecrypt = {
     pswd: string
 
     iterations?: number
-    secretHex?: string
+    decryptionKeyHex?: string
     cacheDecryptionKey?: boolean
     cacheHit?: boolean
     decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
@@ -62,7 +63,7 @@ export type DecryptAndCache = {
     pswd: string
 
     iterations?: number
-    secretHex?: string
+    decryptionKeyHex?: string
     cacheDecryptionKey?: boolean
     cacheHit?: boolean
     decryptionErrorCb?: CbRef<DecryptionErrorCbArgs>
@@ -86,7 +87,7 @@ export type _Decrypt = {
     pswd: string,
 
     iterations?: number,
-    secretHex?: string,
+    decryptionKeyHex?: string,
 }
 
 // Coerce a "callback ref" (which may be a callback function or a "."-delimited string name of a global function, e.g.
@@ -103,7 +104,7 @@ function getCb<T>(cb: CbRef<T>): Cb<T> {
 
 export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb, decryptionErrorCb, scrubHash, watchHash, }: InjectConfig) {
     // In the common case, the `pswd` argument is empty, and we look for it in the URL "hash"
-    let secretHex: string
+    let decryptionKeyHex: string
     if (!pswd) {
         const hash = document.location.hash
         if (hash && hash.length > 1) {
@@ -137,8 +138,25 @@ export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb
         }
     }
 
-    // Optionally watch for changes to the URL hash; re-attempt decryption if found. If successful decryption occurs on
-    // this pass, this listener is immediately removed
+    // If `cache` is true, the `decryptionKeyHex` (post-PBKDF2) is cached in localStorage under a key that is unique to the
+    // current URL "pathname" component (all of `localStorage` is assumed to be specific to the current "hostname").
+    // Caching the post-PBKDF2 decryption key allows for faster reloads of previously decrypted pages.
+    const localStorageKey = cacheDecryptionKey ? getLocalStorageKey() : undefined
+
+    let cacheHit = false
+    if (!pswd && cacheDecryptionKey) {
+        decryptionKeyHex = localStorage.getItem(localStorageKey)
+        if (decryptionKeyHex) {
+            console.log("Read decryptionKeyHex from cache:", decryptionKeyHex)
+            cacheHit = true
+        }
+    }
+
+    // Optionally, and if no password or decryption key is found:
+    // - Watch for changes to the URL hash.
+    // - Re-attempt decryption when a new hash is detected.
+    //
+    // If successful decryption occurs on the current pass, this listener is immediately removed
     let hashListener: (() => void) | undefined
     if (watchHash || watchHash === undefined) {
         hashListener = () => {
@@ -149,26 +167,13 @@ export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb
         console.log(`Added hashListener: ${hashListener}`)
     }
 
-    // If `cache` is true, the `secretHex` (post-PBKDF2) is cached in localStorage under a key that is unique to the
-    // current URL "pathname" component (all of `localStorage` is assumed to be specific to the current "hostname").
-    // Caching post-PBKDF2 secret material allows for faster reloads of previously decrypted pages.
-    const localStorageKey = cacheDecryptionKey ? getLocalStorageKey() : undefined
-
-    let cacheHit = false
-    if (!pswd && cacheDecryptionKey) {
-        secretHex = localStorage.getItem(localStorageKey)
-        if (secretHex) {
-            console.log("Read secretHex from cache:", secretHex)
-            cacheHit = true
-        }
-    }
-
     // If no decryption key was provided explicitly or found in the `localStorage` cache, we're essentially in an error
     // state (though the exact semantics are up to the containing application; a friendly "please enter the password"
     // page, or even an app with reduced functionality/data, may be desired).
     // `missingKeyCb` is invoked here (defaulting to `console.log`, but a string like "MyApp.myMissingKeyCb" can be
     // provided as well)
-    if (!pswd && !secretHex) {
+    if (!pswd && !decryptionKeyHex) {
+
         const msg = "Please provide a password / decryption key as a URL hash"
         if (!missingKeyCb) {
             missingKeyCb = ({ msg }: MissingKeyCbArgs) => console.log(msg)
@@ -178,7 +183,7 @@ export function inject({ src, pswd, iterations, cacheDecryptionKey, missingKeyCb
         return
     }
 
-    return fetchAndDecrypt({ src, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
+    return fetchAndDecrypt({ src, pswd, iterations, decryptionKeyHex: decryptionKeyHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
 }
 
 // Simplest entrypoint to decryption+injection from client: call with password, all other configs pulled from global
@@ -194,28 +199,30 @@ export function decrypt(pswd: string, config?: Decrypt) {
 }
 
 // Fetch+decrypt encrypted source bundle (and optionally cache, if `localStorageKey` is provided)
-export function fetchAndDecrypt({ src, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: FetchAndDecrypt) {
+export function fetchAndDecrypt({ src, pswd, iterations, decryptionKeyHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: FetchAndDecrypt) {
     // Fetch + Decrypt the remote+encrypted source bundle
+    console.time('fetch src')
     return fetch(src)
         .then(response => {
+            console.timeEnd('fetch src')
             checkStatus(response)
             return response.arrayBuffer().then(buf => new Uint8Array(buf))
         })
         .then(encrypted => {
-            decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
+            decryptAndCache({ encrypted, pswd, iterations, decryptionKeyHex: decryptionKeyHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, })
         })
 }
 
 // Decrypt ciphertext, optionally cache decryption key in `localStorage`
-export function decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: DecryptAndCache ) {
+export function decryptAndCache({ encrypted, pswd, iterations, decryptionKeyHex, cacheDecryptionKey, cacheHit, decryptionErrorCb, hashListener, }: DecryptAndCache ) {
     const localStorageKey = getLocalStorageKey()
     try {
-        const { source, secret } = _decrypt({ encrypted, pswd, iterations, secretHex, })
-        if (cacheDecryptionKey && !secretHex) {
-            // Cache the post-PBKDF2 secret material for faster subsequent reloads
-            secretHex = toHexString(secret)
-            localStorage.setItem(localStorageKey, secretHex)
-            console.log(`Saved secretHex, ${localStorageKey}: ${secretHex}`)
+        const { source, decryptionKey } = _decrypt({ encrypted, pswd, iterations, decryptionKeyHex, })
+        if (cacheDecryptionKey && !decryptionKeyHex) {
+            // Cache the post-PBKDF2 decryption key for faster subsequent reloads
+            decryptionKeyHex = toHexString(decryptionKey)
+            localStorage.setItem(localStorageKey, decryptionKeyHex)
+            console.log(`Saved decryptionKeyHex, ${localStorageKey}: ${decryptionKeyHex}`)
         }
 
         // Inject the decrypted source by appending to document.body. TODO: make this configurable?
@@ -234,8 +241,8 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheD
         console.log(`Caught: ${err} (${err instanceof DecryptionError}), ${err.name}`)
         if (err instanceof DecryptionError) {
             // DecryptionError can result from:
-            // 1. secret material was cached in `localStorage` for a previous version of this URL, and is now
-            //    out of date (secret was read from cache, where it would only have been stored after a previous
+            // 1. decryption key was cached in `localStorage` for a previous version of this URL, and is now out of date
+            //    (decryption key was read from cache, where it would only have been stored after a previous
             //    successful decryption, but now decryption has failed), or
             // 2. password provided in this decryption invocation failed to decrypt the ciphertext (password is
             //    incorrect, presumably)
@@ -244,7 +251,7 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheD
             // (defaults to `alert` + `throw`, but can be passed a string like "MyApp.myDecryptionErrorCb").
             console.log(`Caught DecryptionError: ${err}`)
             if (cacheHit) {
-                console.log(`Clearing cache key ${localStorageKey} after unsuccessful decryption of cached secretHex`)
+                console.log(`Clearing cache key ${localStorageKey} after unsuccessful decryption of cached decryptionKeyHex`)
                 localStorage.removeItem(localStorageKey)
             }
             const msg =
@@ -266,37 +273,41 @@ export function decryptAndCache({ encrypted, pswd, iterations, secretHex, cacheD
     }
 }
 
-// Perform+verify decryption, return decrypted source + post-PBKDF2 secret (for possible caching)
+// Perform+verify decryption, return decrypted source + post-PBKDF2 decryption key (for possible caching)
 export function _decrypt(
-    { encrypted, pswd, iterations, secretHex, }: _Decrypt
+    { encrypted, pswd, iterations, decryptionKeyHex, }: _Decrypt
 ): {
     source: string,
-    secret: Uint8Array
+    decryptionKey: Uint8Array
 } {
-    let secret: Uint8Array
+    let decryptionKey: Uint8Array
     const nonce = encrypted.slice(SALT_LENGTH, SALT_LENGTH + NONCE_LENGTH)
     const ciphertext = encrypted.slice(SALT_LENGTH + NONCE_LENGTH)
     iterations = iterations || DEFAULT_ITERATIONS
-    if (secretHex) {
+    if (decryptionKeyHex) {
         // If the secret is already known + passed in, we can skip the expensive PBKDF2 step
-        secret = fromHexString(secretHex)
+        decryptionKey = fromHexString(decryptionKeyHex)
     } else {
         console.log(`decrypting: ${iterations} iterations`)
         const saltBuf = encrypted.slice(0, SALT_LENGTH)
-        console.log(`  salt: ${toHexString(saltBuf)}`)
+        console.log(`salt: ${toHexString(saltBuf)}`)
         // console.log(`  pswd: ${pswd}`)
         const salt = convertUint8ArrayToWordArray(saltBuf)
-        secret = toUint8Array(CryptoJS.PBKDF2(pswd, salt, {
+        console.time('hscrypt:PBKDF2')
+        decryptionKey = toUint8Array(CryptoJS.PBKDF2(pswd, salt, {
             hasher: CryptoJS.algo.SHA512,
-            keySize: SECRET_KEY_LENGTH / 4,
+            keySize: DECRYPTION_KEY_LENGTH / 4,
             iterations: iterations || DEFAULT_ITERATIONS
         }))
+        console.timeEnd('hscrypt:PBKDF2')
     }
-    console.log(` nonce: ${toHexString(nonce)}`)
-    console.log(`secret: ${toHexString(secret)}`)
+    console.log(`nonce: ${toHexString(nonce)}`)
+    console.log(`decryptionKey: ${toHexString(decryptionKey)}`)
     console.log(`iterations: ${iterations}`)
-    const decoder = new Chacha20(secret, nonce)
+    const decoder = new Chacha20(decryptionKey, nonce)
+    console.time('hscrypt:decrypt')
     const plaintext = new TextDecoder().decode(decoder.decrypt(ciphertext))
+    console.timeEnd('hscrypt:decrypt')
 
     // If decryption was successful, the plaintext will begin with the `SOURCE_PREFIX` magic bytes ("/* hscrypt */ ")
     const prefix = plaintext.substring(0, SOURCE_PREFIX.length)
@@ -304,5 +315,5 @@ export function _decrypt(
         throw new DecryptionError(`Invalid prefix: ${prefix}`)
     }
     const source = plaintext.substring(SOURCE_PREFIX.length)
-    return { source, secret }
+    return { source, decryptionKey }
 }
