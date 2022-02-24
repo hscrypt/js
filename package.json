@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "crypto-js": "^4.1.1",
-    "ts-chacha20": "^1.2.0-rc.2"
+    "ts-chacha20": "^1.2.0"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.1.0",
